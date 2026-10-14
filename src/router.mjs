@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   REPO_DIR, STATE_DIR, LIMITS, ERROR, AGENTS, ADAPTERS, adapterFor, agentNames, validateRequest, expandInputs,
-  taskDir, sha256, resetStage, diffStage, runOnce, log, deniedReason, RETRY_SAME, FAIL_OVER,
+  taskDir, sha256, resetStage, diffStage, runOnce, log, deniedReason, RETRY_SAME, FAIL_OVER, expandImages, activeTasks, describeRun,
 } from './core.mjs';
 
 export const ROUTING = JSON.parse(fs.readFileSync(path.join(REPO_DIR, 'routing.json'), 'utf8'));
@@ -29,6 +29,10 @@ export function classify(req, staged = { total: 0, count: 0 }) {
   if (staged.count > 10) { score += 1; reasons.push(`${staged.count} files +1`); }
   if (req.permissions?.write) { score += 1; reasons.push('writes files +1'); }
   if (req.objective.length > 1500) { score += 1; reasons.push('long brief +1'); }
+  // Visual judgement is never a light job; many sheets need the strongest tier.
+  const nImg = (req.images || []).length;
+  if (nImg) { const pts = nImg > 8 ? 3 : 2; score += pts; reasons.push(`${nImg} image(s) +${pts}`); }
+  if (req.permissions?.web) { score += 1; reasons.push('web research +1'); }
   const tier = score <= c.thresholds.light_max ? 'light' : score <= c.thresholds.standard_max ? 'standard' : 'heavy';
   return { tier, score, reasons };
 }
@@ -118,6 +122,8 @@ export async function buildCandidates(req, tier) {
     if (!agentNames().includes(c.agent)) continue;
     const adapter = adapterFor(c.agent);
     if (!adapter.resolve()) { notes.push(`skip ${c.agent}: not installed`); continue; }
+    if (req.permissions?.web && adapter.caps && !adapter.caps.web) { notes.push(`skip ${c.agent}: no background web access`); continue; }
+    if (req.images?.length && adapter.caps && !adapter.caps.images) { notes.push(`skip ${c.agent}: cannot view images`); continue; }
     const block = blockedBy(limits, c);
     if (block) { notes.push(`skip ${c.agent}${c.model ? `:${c.model}` : ''}: ${block.reason} until ${block.until}`); continue; }
     // AGENT_BRIDGE_SKIP_MODEL_CHECK=1 (tests) lets an unlisted model reach the agent to exercise runtime failover.
@@ -197,6 +203,9 @@ export async function runTask(raw, { signal } = {}) {
   };
 
   const staged = expandInputs(req);
+  const imgs = expandImages(req);
+  staged.errors.push(...imgs.errors);
+  for (const [rel, abs] of imgs.files) staged.files.set(rel, abs);
   result.warnings.push(...staged.warnings);
   if (staged.errors.length) {
     result.status = 'invalid_request';
@@ -249,11 +258,12 @@ export async function runTask(raw, { signal } = {}) {
     const o = last.output;
     const changes = diffStage(dir, manifest);
     Object.assign(result, {
-      status: 'success', agent: last.agent, model: last.model, effort: last.effort, summary: o.summary, findings: o.findings,
-      recommended_next_action: o.recommended_next_action, worker_session_id: last.session_id ?? null, usage: last.usage ?? null,
+      status: 'success', agent: last.agent, model: last.model, effort: last.effort, ran_on: describeRun(last),
+      summary: o.summary ?? '', findings: Array.isArray(o.findings) ? o.findings : [], output: req.output_schema ? o : undefined,
+      recommended_next_action: o.recommended_next_action ?? "", worker_session_id: last.session_id ?? null, usage: last.usage ?? null,
       files_created: changes.created, files_modified: changes.modified, files_deleted: changes.deleted, patch_path: changes.patchPath,
     });
-    result.warnings.push(...o.warnings);
+    if (Array.isArray(o.warnings)) result.warnings.push(...o.warnings);
     if (result.attempts.length > 1) result.warnings.push(`completed by ${last.agent}:${last.model ?? 'default'} after ${result.attempts.length - 1} failed attempt(s); see attempts`);
     const touched = [...changes.created, ...changes.modified, ...changes.deleted];
     if (touched.length && !req.permissions.write) result.warnings.push(`read-only task but the worker changed ${touched.length} staged file(s); changes were NOT made available to apply`);
@@ -276,7 +286,7 @@ export async function runTask(raw, { signal } = {}) {
 // ---------------------------------------------------------------- status
 
 export async function agentStatus() {
-  const out = { state_dir: STATE_DIR, agents: {}, limits: readLimits() };
+  const out = { state_dir: STATE_DIR, running: activeTasks().map((a) => ({ task_id: a.task_id, running_on: describeRun(a), elapsed_sec: a.elapsed_sec, kind: a.kind, objective: a.objective })), agents: {}, limits: readLimits() };
   for (const name of AGENTS) {
     const a = ADAPTERS[name]; const r = a.resolve();
     out.agents[name] = r ? { available: true, bin: r.bin, source: r.source, ...(await a.status(r)), models: (await a.models(r).catch(() => null))?.map((m) => m.slug) ?? 'unknown' }

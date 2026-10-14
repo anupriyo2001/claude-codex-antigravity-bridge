@@ -174,6 +174,38 @@ await test('unavailable agent skipped by the router', async () => {
   } finally { delete process.env.AGENT_BRIDGE_CODEX_BIN; delete process.env.AGENT_BRIDGE_AGY_BIN; }
 });
 
+// ------------------------------------------------------------- team features: images, schemas, web, visibility
+
+await test('images staged under _images; custom output schema returned as output', async () => {
+  fs.writeFileSync(path.join(PROJ, 'sheet.jpg'), Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
+  fs.writeFileSync(path.join(OUTSIDE, 'other.png'), Buffer.from([0x89, 0x50]));
+  const schema = { type: 'object', required: ['summary', 'picks'], properties: { summary: { type: 'string' }, picks: { type: 'array', items: { type: 'string' } } } };
+  const r = await router.runTask(task({ objective: 'mock=custom', images: ['sheet.jpg'], output_schema: schema }));
+  ok(r.status === 'success' && r.output?.picks?.length === 1 && /01-sheet\.jpg/.test(r.output.picks[0]), JSON.stringify(r).slice(0, 400));
+  const bad = await router.runTask(task({ objective: 'mock=custom', images: [path.join(OUTSIDE, 'other.png')] }));
+  ok(bad.status === 'invalid_request' && /outside the allowed roots/.test(bad.errors[0].message), 'image outside roots accepted');
+  const media = await router.runTask(task({ objective: 'x', images: ['clip.mp4'] }));
+  ok(media.status === 'invalid_request', 'video accepted as image');
+  const miss = await router.runTask(task({ objective: 'mock=ok', output_schema: schema }));
+  ok(miss.status === 'failed' && miss.errors[0].class === 'MALFORMED_OUTPUT' && /picks/.test(miss.errors[0].message), JSON.stringify(miss.errors));
+});
+await test('web jobs never go to Antigravity (its web tools open a visible browser)', async () => {
+  const r = await router.routeTask({ objective: 'check this fact online', agent: 'antigravity', permissions: { web: true } });
+  ok(r.candidates.every((c) => c.agent !== 'antigravity'), JSON.stringify(r.candidates));
+  return `chain: ${r.candidates.map((c) => c.agent).join(' > ') || '(none installed)'}`;
+});
+await test('visibility: running jobs listed with agent / model / effort', async () => {
+  const p = router.runTask(task({ task_id: 'visible-1', objective: 'mock=hang', timeout_sec: 6 }));
+  await new Promise((r) => setTimeout(r, 1500));
+  const st = await router.agentStatus();
+  const row = st.running.find((x) => x.task_id === 'visible-1');
+  ok(row && /mock · default · effort default/.test(row.running_on) && row.elapsed_sec >= 1, JSON.stringify(st.running));
+  await p;
+  ok(!(await router.agentStatus()).running.some((x) => x.task_id === 'visible-1'), 'finished job still listed');
+  ok(core.describeRun({ agent: 'antigravity', model: 'gemini-3.8-flash-medium', effort: null }) === 'antigravity · gemini-3.8-flash-medium · effort medium', 'effort from slug');
+  return row.running_on;
+});
+
 // ------------------------------------------------------------- staging, apply, concurrency, orphans
 
 await test('read-only task: worker edits never applicable', async () => {

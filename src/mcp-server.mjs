@@ -4,7 +4,7 @@
 import readline from 'node:readline';
 import fs from 'node:fs';
 import path from 'node:path';
-import { getResult, applyChanges, newTaskId, sweepOrphans, STATE_DIR, TASK_ID_RE } from './core.mjs';
+import { getResult, applyChanges, newTaskId, sweepOrphans, STATE_DIR, TASK_ID_RE, activeTasks, describeRun } from './core.mjs';
 import { runTask, routeTask, agentStatus, readLimits, clearLimits } from './router.mjs';
 
 // Some MCP hosts cancel stdio tool calls after ~60 s, so task tools wait at most WAIT_MAX seconds,
@@ -28,7 +28,11 @@ const taskProps = {
   timeout_sec: { type: 'integer', minimum: 5, maximum: 1800, description: 'Per attempt. Default 600.' },
   retries: { type: 'integer', minimum: 0, maximum: 2, description: 'Same-candidate retries for crash/malformed output. Default 1.' },
   failover: { type: 'boolean', description: 'Move to the next model/agent on usage limits or failures. Default true.' },
-  permissions: { type: 'object', properties: { write: { type: 'boolean', description: 'true lets the worker edit its staged copy; the project is untouched until agent_apply_changes.' } }, additionalProperties: false },
+  permissions: { type: 'object', properties: {
+    write: { type: 'boolean', description: 'true lets the worker edit its staged copy; the project is untouched until agent_apply_changes.' },
+    web: { type: 'boolean', description: 'true allows background web search (Codex only, via API; no browser). Routes to Codex.' } }, additionalProperties: false },
+  images: { type: 'array', items: { type: 'string' }, description: 'Up to 16 .jpg/.png/.webp (contact sheets, thumbnails, frames) for vision jobs; project-relative or absolute inside an allowed root.' },
+  output_schema: { type: 'object', description: 'Optional JSON Schema (type object) for a custom answer shape; the result carries it as `output`. For Codex, every object needs additionalProperties:false and all properties required.' },
   task_id: { type: 'string' },
   wait_sec: { type: 'integer', minimum: 0, maximum: WAIT_MAX, description: `Seconds to wait before returning status "running" (default ${WAIT_DEFAULT}).` },
 };
@@ -61,8 +65,17 @@ const toolResult = (obj, isError) => ({ content: [{ type: 'text', text: JSON.str
 const tasks = new Map(); // task_id -> { promise, abort, done }
 const waitFor = (promise, sec) => Promise.race([promise, new Promise((r) => setTimeout(() => r(null), sec * 1000))]);
 const clampWait = (v) => (Number.isInteger(v) ? Math.max(0, Math.min(WAIT_MAX, v)) : WAIT_DEFAULT);
-const runningResult = (taskId) => ({ task_id: taskId, status: 'running', summary: 'Still working in the background.',
-  recommended_next_action: `Call agent_task_result with task_id "${taskId}" to collect the result.` });
+const runningResult = (taskId) => {
+  const a = activeTasks().find((x) => x.task_id === taskId);
+  return { task_id: taskId, status: 'running', running_on: a ? describeRun(a) : 'starting', elapsed_sec: a?.elapsed_sec ?? 0,
+    summary: a ? `Running on ${describeRun(a)} for ${a.elapsed_sec}s (attempt ${a.attempt}).` : 'Starting.',
+    recommended_next_action: `Call agent_task_result with task_id "${taskId}" to collect the result.` };
+};
+// First line of every task result names the agent, model and effort, like a subagent label.
+const headline = (r) => (r.status === 'running' ? `[${r.running_on}] running ${r.elapsed_sec}s - ${r.task_id}`
+  : r.agent ? `[${r.ran_on ?? `${r.agent} · ${r.model ?? 'default'} · effort ${r.effort ?? 'default'}`}] ${r.status} in ${r.duration_sec}s - ${r.task_id}`
+    : `[no agent] ${r.status} - ${r.task_id ?? ''}`);
+const taskResult = (r, isError) => ({ ...toolResult(r, isError), content: [{ type: 'text', text: `${headline(r)}\n${JSON.stringify(r, null, 2)}` }] });
 
 async function callTool(name, args = {}) {
   if (name === 'agent_bridge_status') return toolResult(await agentStatus(), false);
@@ -81,17 +94,17 @@ async function callTool(name, args = {}) {
     entry.promise = runTask({ ...rest, task_id: taskId, agent }, { signal: ac.signal }).finally(() => { entry.done = true; });
     tasks.set(taskId, entry);
     const r = await waitFor(entry.promise, clampWait(waitSec));
-    if (!r) return toolResult(runningResult(taskId), false);
-    return toolResult(r, r.status !== 'success');
+    if (!r) return taskResult(runningResult(taskId), false);
+    return taskResult(r, r.status !== 'success');
   }
   if (name === 'agent_task_result') {
     const entry = tasks.get(args.task_id);
     if (entry && !entry.done) {
       const r = await waitFor(entry.promise, clampWait(args.wait_sec));
-      if (!r) return toolResult(runningResult(args.task_id), false);
+      if (!r) return taskResult(runningResult(args.task_id), false);
     }
     const r = getResult(args.task_id);
-    if (r) return toolResult(r, r.status !== 'success');
+    if (r) return taskResult(r, r.status !== 'success');
     const started = typeof args.task_id === 'string' && TASK_ID_RE.test(args.task_id)
       && fs.existsSync(path.join(STATE_DIR, 'tasks', args.task_id, 'request.json'));
     return toolResult(started

@@ -2,24 +2,139 @@
   "$comment": "Task contract sent by the orchestrator to the bridge (delegate_task / codex_task / antigravity_task / cli run).",
   "type": "object",
   "additionalProperties": false,
-  "required": ["objective"],
+  "required": [
+    "objective"
+  ],
   "properties": {
-    "task_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$", "description": "Generated when omitted. Must be unique." },
-    "agent": { "type": "string", "enum": ["auto", "codex", "antigravity"], "description": "auto = router chooses. A named agent is preferred, others are failover." },
-    "objective": { "type": "string", "minLength": 1, "maxLength": 8000 },
-    "kind": { "type": "string", "enum": ["explain", "summarize", "review", "test", "analyze", "debug", "implement", "design", "other"] },
-    "tier": { "type": "string", "enum": ["auto", "light", "standard", "heavy"] },
-    "model": { "type": "string", "description": "Pin a model slug (needs a specific agent)." },
-    "effort": { "type": "string", "enum": ["low", "medium", "high", "xhigh", "max"] },
-    "failover": { "type": "boolean", "description": "Default true: move to the next model/agent on usage limits or failures." },
-    "fallback_agent": { "type": "string", "enum": ["codex", "antigravity", "none"], "description": "Legacy; \"none\" disables failover." },
-    "project_path": { "type": "string" },
-    "input_files": { "type": "array", "items": { "type": "string" }, "maxItems": 200 },
-    "context": { "type": "string", "maxLength": 20000 },
-    "constraints": { "type": "array", "items": { "type": "string" }, "maxItems": 50 },
-    "expected_output": { "type": "string", "maxLength": 4000 },
-    "timeout_sec": { "type": "integer", "minimum": 5, "maximum": 1800 },
-    "retries": { "type": "integer", "minimum": 0, "maximum": 2 },
-    "permissions": { "type": "object", "additionalProperties": false, "properties": { "write": { "type": "boolean" } } }
+    "task_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+      "description": "Generated when omitted. Must be unique."
+    },
+    "agent": {
+      "type": "string",
+      "enum": [
+        "auto",
+        "codex",
+        "antigravity"
+      ],
+      "description": "auto = router chooses. A named agent is preferred, others are failover."
+    },
+    "objective": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 8000
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "explain",
+        "summarize",
+        "review",
+        "test",
+        "analyze",
+        "debug",
+        "implement",
+        "design",
+        "other"
+      ]
+    },
+    "tier": {
+      "type": "string",
+      "enum": [
+        "auto",
+        "light",
+        "standard",
+        "heavy"
+      ]
+    },
+    "model": {
+      "type": "string",
+      "description": "Pin a model slug (needs a specific agent)."
+    },
+    "effort": {
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ]
+    },
+    "failover": {
+      "type": "boolean",
+      "description": "Default true: move to the next model/agent on usage limits or failures."
+    },
+    "fallback_agent": {
+      "type": "string",
+      "enum": [
+        "codex",
+        "antigravity",
+        "none"
+      ],
+      "description": "Legacy; \"none\" disables failover."
+    },
+    "project_path": {
+      "type": "string"
+    },
+    "input_files": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 200
+    },
+    "context": {
+      "type": "string",
+      "maxLength": 20000
+    },
+    "constraints": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 50
+    },
+    "expected_output": {
+      "type": "string",
+      "maxLength": 4000
+    },
+    "timeout_sec": {
+      "type": "integer",
+      "minimum": 5,
+      "maximum": 1800
+    },
+    "retries": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 2
+    },
+    "permissions": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "write": {
+          "type": "boolean"
+        },
+        "web": {
+          "type": "boolean",
+          "description": "Background web search (Codex only, API, no browser)."
+        }
+      }
+    },
+    "images": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "\\.(jpe?g|png|webp)$"
+      },
+      "maxItems": 16,
+      "description": "Still images for vision jobs; project-relative or absolute inside an allowed root."
+    },
+    "output_schema": {
+      "type": "object",
+      "description": "Optional JSON Schema (type object) for a custom answer; returned as result.output."
+    }
   }
 }

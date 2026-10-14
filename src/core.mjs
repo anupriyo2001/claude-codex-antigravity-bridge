@@ -66,7 +66,11 @@ const FAIL_OVER = new Set([ERROR.RATE_LIMIT, ERROR.MODEL, ERROR.AUTH, ERROR.UNAV
 export const TASK_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 const KINDS = ['explain', 'summarize', 'review', 'test', 'analyze', 'debug', 'implement', 'design', 'other'];
 const KNOWN_KEYS = new Set(['task_id', 'agent', 'objective', 'project_path', 'input_files', 'context', 'constraints',
-  'expected_output', 'timeout_sec', 'retries', 'permissions', 'kind', 'tier', 'model', 'effort', 'failover', 'fallback_agent']);
+  'expected_output', 'timeout_sec', 'retries', 'permissions', 'kind', 'tier', 'model', 'effort', 'failover', 'fallback_agent',
+  'images', 'output_schema']);
+const IMAGE_EXT = /\.(jpe?g|png|webp)$/i;
+const MAX_IMAGES = 16;
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 
 const mockEnabled = () => process.env.AGENT_BRIDGE_ENABLE_MOCK === '1';
 export const agentNames = () => (mockEnabled() ? [...AGENTS, 'mock', 'mock2'] : AGENTS);
@@ -91,7 +95,9 @@ export function validateRequest(raw) {
     expected_output: raw.expected_output ?? '',
     timeout_sec: raw.timeout_sec ?? LIMITS.default_timeout_sec,
     retries: raw.retries ?? LIMITS.default_retries,
-    permissions: { write: raw.permissions?.write === true },
+    permissions: { write: raw.permissions?.write === true, web: raw.permissions?.web === true },
+    images: raw.images ?? [],
+    output_schema: raw.output_schema ?? null,
     kind: raw.kind ?? 'other',
     tier: raw.tier ?? 'auto',
     model: raw.model ?? null,
@@ -116,7 +122,10 @@ export function validateRequest(raw) {
   if (req.effort !== null && !['low', 'medium', 'high', 'xhigh', 'max'].includes(req.effort)) errors.push('effort must be low, medium, high, xhigh or max');
   if (req.fallback_agent !== null && req.fallback_agent !== 'none' && !agentNames().includes(req.fallback_agent)) errors.push('fallback_agent must be codex, antigravity or none');
   if (req.fallback_agent === 'none') req.failover = false;
-  if (raw.permissions !== undefined && (typeof raw.permissions !== 'object' || Object.keys(raw.permissions).some((k) => k !== 'write'))) errors.push('permissions only supports {"write": boolean}');
+  if (raw.permissions !== undefined && (typeof raw.permissions !== 'object' || Object.keys(raw.permissions).some((k) => !['write', 'web'].includes(k)))) errors.push('permissions supports {"write": boolean, "web": boolean}');
+  if (!Array.isArray(req.images) || req.images.length > MAX_IMAGES || req.images.some((f) => typeof f !== 'string' || !IMAGE_EXT.test(f))) errors.push(`images must be up to ${MAX_IMAGES} .jpg/.png/.webp paths`);
+  if (req.output_schema !== null && (typeof req.output_schema !== 'object' || Array.isArray(req.output_schema) || req.output_schema.type !== 'object')) errors.push('output_schema must be a JSON Schema object with "type": "object"');
+  else if (req.output_schema && JSON.stringify(req.output_schema).length > 20000) errors.push('output_schema is too large');
   if (!ALLOWED_ROOTS.some((r) => isInside(req.project_path, r))) errors.push(`project_path is outside the allowed roots (${ALLOWED_ROOTS.join('; ')})`);
   else if (!fs.existsSync(req.project_path) || !fs.statSync(req.project_path).isDirectory()) errors.push('project_path does not exist or is not a folder');
   return { errors, req };
@@ -156,6 +165,23 @@ export function expandInputs(req) {
   if (files.size > LIMITS.max_files) errors.push(`too many files (${files.size} > ${LIMITS.max_files})`);
   if (total > LIMITS.max_total_bytes) errors.push(`input too large (${total} > ${LIMITS.max_total_bytes} bytes)`);
   return { errors, warnings, files, total };
+}
+
+// Images (contact sheets, thumbnails, preview frames) for vision jobs. They may live in the project or
+// in any allowed root (e.g. an external media folder) and are staged under `_images/`. Video/audio never.
+export function expandImages(req) {
+  const errors = []; const files = new Map(); let total = 0;
+  req.images.forEach((item, n) => {
+    const abs = path.isAbsolute(item) ? path.resolve(item) : path.resolve(req.project_path, item);
+    if (!ALLOWED_ROOTS.some((r) => isInside(abs, r))) { errors.push(`refused image ${item}: outside the allowed roots`); return; }
+    if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) { errors.push(`refused image ${item}: does not exist`); return; }
+    if (fs.lstatSync(abs).isSymbolicLink()) { errors.push(`refused image ${item}: symbolic link`); return; }
+    const size = fs.statSync(abs).size;
+    if (size > MAX_IMAGE_BYTES) { errors.push(`refused image ${item}: larger than ${MAX_IMAGE_BYTES} bytes`); return; }
+    total += size;
+    files.set(path.join('_images', `${String(n + 1).padStart(2, '0')}-${path.basename(abs)}`), abs);
+  });
+  return { errors, files, total };
 }
 
 // ---------------------------------------------------------------- files
@@ -289,6 +315,32 @@ function checkWorkerOutput(o) {
   return null;
 }
 
+// Caller-supplied schema: the agent CLIs enforce it; here we only confirm an object with the required keys.
+function checkCustomOutput(o, schema) {
+  if (!o || typeof o !== 'object' || Array.isArray(o)) return 'not a JSON object';
+  const missing = (schema.required || []).filter((k) => !(k in o));
+  return missing.length ? `missing required field(s): ${missing.join(', ')}` : null;
+}
+
+// Jobs currently running in any bridge process (MCP server or CLI), for live visibility.
+export function activeTasks() {
+  const dir = path.join(STATE_DIR, 'active');
+  if (!fs.existsSync(dir)) return [];
+  const out = [];
+  for (const f of fs.readdirSync(dir)) {
+    const file = path.join(dir, f);
+    let a; try { a = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { continue; }
+    let alive = true; try { process.kill(a.owner_pid, 0); } catch (e) { alive = e.code === 'EPERM'; }
+    if (!alive) { fs.rmSync(file, { force: true }); continue; }
+    out.push({ ...a, elapsed_sec: Math.round((Date.now() - Date.parse(a.started)) / 1000) });
+  }
+  return out;
+}
+
+// Antigravity encodes effort in the model slug (e.g. gemini-3.8-flash-low); show it like Codex effort.
+const effortOf = (a) => (a.effort && a.effort !== 'default' ? a.effort : (/-(low|medium|high|xhigh|max)$/.exec(a.model || '') || [])[1] || 'default');
+export const describeRun = (a) => `${a.agent} · ${a.model ?? 'default'} · effort ${effortOf(a)}`;
+
 export function parseJsonLoose(text) {
   if (typeof text !== 'string') return null;
   const t = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
@@ -302,8 +354,22 @@ export function classifyText(text) {
   return null;
 }
 
-function workerPrompt(req, stagedFiles, { noShell = false } = {}) {
-  const list = stagedFiles.length ? stagedFiles.map((f) => `- ${f.split(path.sep).join('/')}`).join('\n') : '- (no files were staged)';
+function workerPrompt(req, stagedFiles, { noShell = false, viewImages = false } = {}) {
+  const posix = (f) => f.split(path.sep).join('/');
+  const images = stagedFiles.filter((f) => f.startsWith(`_images${path.sep}`));
+  const files = stagedFiles.filter((f) => !images.includes(f));
+  const list = files.length ? files.map((f) => `- ${posix(f)}`).join('\n') : '- (no text files were staged)';
+  const imageLines = images.length
+    ? ['', `IMAGES (${images.length}) to look at${viewImages ? ' (open each with your file/image viewer)' : ' (attached to this message, in this order)'}:`, ...images.map((f) => `- ${posix(f)}`)]
+    : [];
+  const netRule = req.permissions.web
+    ? '- You MAY use your built-in web search to read public pages for this objective. Do not log in, download files, submit forms or open/drive a browser window.'
+    : '- Do not use the network or a browser, install packages, push, publish, upload or change any account or system setting.';
+  const finalAnswer = req.output_schema
+    ? ['', 'FINAL ANSWER: return only the JSON object required by the output schema you were given.']
+    : ['', 'FINAL ANSWER: return only the JSON object required by the output schema:',
+      'summary (what you did and concluded), findings (concrete issues; file = relative path or null, line = number or null),',
+      'warnings (limits, unverified points), recommended_next_action (one concrete step for the orchestrator).'];
   const writeRule = req.permissions.write
     ? 'You may create or modify files inside the current directory only. Do not delete files. The orchestrator reviews every change before anything reaches the real project.'
     : 'This is a READ-ONLY task. Do not create, modify or delete any file.';
@@ -315,16 +381,16 @@ function workerPrompt(req, stagedFiles, { noShell = false } = {}) {
     req.constraints.length ? `\nCONSTRAINTS:\n${req.constraints.map((c) => `- ${c}`).join('\n')}` : '',
     req.expected_output ? `\nEXPECTED OUTPUT:\n${req.expected_output}` : '',
     '', 'WORKSPACE: the current directory is an isolated staged copy that contains only these files:', list,
+    ...imageLines,
     '', 'RULES:',
     '- Work only inside the current directory. Do not read, list or search anything outside it.',
     '- Do not read environment variables, credentials, keys, browser data or user-profile folders.',
-    '- Do not use the network, install packages, push, publish, upload or change any account or system setting.',
+    netRule,
+    '- Never open, launch or drive a web browser.',
     `- ${writeRule}`,
     ...(noShell ? ['- Terminal/shell commands are NOT available here and will be denied. Do the task by reading (and, if allowed, editing) files only; do not try to run code.'] : []),
-    '- Be honest: if you could not run or verify something, say so in warnings.',
-    '', 'FINAL ANSWER: return only the JSON object required by the output schema:',
-    'summary (what you did and concluded), findings (concrete issues; file = relative path or null, line = number or null),',
-    'warnings (limits, unverified points), recommended_next_action (one concrete step for the orchestrator).',
+    '- Be honest: if you could not run or verify something, say so.',
+    ...finalAnswer,
   ].filter((s) => s !== '').join('\n');
 }
 
@@ -361,14 +427,18 @@ export const ADAPTERS = {
           .map((m) => ({ slug: m.slug, name: m.display_name, description: m.description, efforts: (m.supported_reasoning_levels || []).map((x) => x.effort) }));
       } catch { return null; }
     },
+    caps: { web: true, images: true, shell: true },
     invocation(req, ctx, cand) {
-      const args = ['exec', '--json', '--ephemeral', '--skip-git-repo-check',
+      // --search is a global flag (before `exec`): live web search through the API, no browser.
+      const args = [...(req.permissions.web ? ['--search'] : []), 'exec', '--json', '--ephemeral', '--skip-git-repo-check',
         '--sandbox', req.permissions.write ? 'workspace-write' : 'read-only',
         '-c', 'shell_environment_policy.inherit="core"',
-        '-C', ctx.stage, '--output-schema', WORKER_SCHEMA_PATH, '-o', ctx.lastMessage];
-      if (CONFIG.codex.ignore_user_config) args.splice(4, 0, '--ignore-user-config', ...(IS_WIN ? ['-c', 'windows.sandbox="unelevated"'] : []));
+        '-C', ctx.stage, '--output-schema', ctx.schemaPath, '-o', ctx.lastMessage];
+      if (CONFIG.codex.ignore_user_config) args.splice(args.indexOf('exec') + 4, 0, '--ignore-user-config', ...(IS_WIN ? ['-c', 'windows.sandbox="unelevated"'] : []));
       if (cand.model) args.push('-m', cand.model);
       if (cand.effort) args.push('-c', `model_reasoning_effort="${cand.effort}"`);
+      // -i takes several values, so end the list with `--` before the stdin marker.
+      if (ctx.images.length) args.push('-i', ...ctx.images.map((f) => path.join(ctx.stage, f)), '--');
       args.push('-'); // prompt via stdin: no length limit, nothing sensitive on the command line
       return { args, stdin: ctx.prompt };
     },
@@ -391,7 +461,10 @@ export const ADAPTERS = {
   antigravity: {
     // Google Antigravity CLI, official headless mode: `agy -p ... --output-format json --json-schema`.
     // Shell commands stay soft-denied in headless mode (least privilege), so workers read/edit files only.
+    // No web: its headless web tools drive a visible browser window, so web jobs go to Codex instead.
     noShell: true,
+    viewImages: true,
+    caps: { web: false, images: true, shell: false },
     resolve() {
       const forced = process.env.AGENT_BRIDGE_AGY_BIN || CONFIG.antigravity.bin;
       if (forced) return exists(forced) ? { bin: forced, pre: [], source: 'configured' } : null;
@@ -421,7 +494,7 @@ export const ADAPTERS = {
       return list;
     },
     invocation(req, ctx, cand) {
-      const args = ['-p', ctx.prompt, '--output-format', 'json', '--json-schema', WORKER_SCHEMA_PATH,
+      const args = ['-p', ctx.prompt, '--output-format', 'json', '--json-schema', ctx.schemaPath,
         '--print-timeout', `${req.timeout_sec}s`, '--sandbox'];
       if (cand.model) args.push('--model', cand.model);
       if (cand.effort) args.push('--effort', cand.effort);
@@ -478,12 +551,26 @@ export async function runOnce(cand, req, dir, stagedFiles, n, signal) {
   const r = adapter.resolve();
   if (!r) return { ...base, ok: false, error_class: ERROR.UNAVAILABLE, message: `${cand.agent} CLI not found (run the setup script)`, duration_sec: 0 };
   if (/\.(cmd|bat)$/i.test(r.bin)) return { ...base, ok: false, error_class: ERROR.UNSUPPORTED, message: `${r.bin} is a batch shim; only real executables are run so prompts cannot be shell-injected`, duration_sec: 0 };
-  const ctx = { stage: path.join(dir, 'stage'), lastMessage: path.join(dir, `attempt-${n}-${cand.agent}-last.json`), prompt: workerPrompt(req, stagedFiles, { noShell: Boolean(adapter.noShell) }) };
+  let schemaPath = WORKER_SCHEMA_PATH;
+  if (req.output_schema) { schemaPath = path.join(dir, 'output-schema.json'); fs.writeFileSync(schemaPath, JSON.stringify(req.output_schema)); }
+  const ctx = {
+    stage: path.join(dir, 'stage'), lastMessage: path.join(dir, `attempt-${n}-${cand.agent}-last.json`), schemaPath,
+    images: stagedFiles.filter((f) => f.startsWith(`_images${path.sep}`)),
+    prompt: workerPrompt(req, stagedFiles, { noShell: Boolean(adapter.noShell), viewImages: Boolean(adapter.viewImages) }),
+  };
   const inv = adapter.invocation(req, ctx, cand);
   const workerFile = path.join(dir, 'worker.json');
-  const onSpawn = (pid) => fs.writeFileSync(workerFile, JSON.stringify({ worker_pid: pid, owner_pid: process.pid, started: new Date().toISOString() }));
+  const activeFile = path.join(STATE_DIR, 'active', `${req.task_id}.json`);
+  const onSpawn = (pid) => {
+    const info = { task_id: req.task_id, agent: cand.agent, model: cand.model ?? 'default', effort: cand.effort ?? 'default', attempt: n,
+      kind: req.kind, started: new Date().toISOString(), timeout_sec: req.timeout_sec, worker_pid: pid, owner_pid: process.pid, objective: req.objective.slice(0, 120) };
+    fs.writeFileSync(workerFile, JSON.stringify(info));
+    fs.mkdirSync(path.dirname(activeFile), { recursive: true });
+    fs.writeFileSync(activeFile, JSON.stringify(info));
+  };
   const proc = await runProcess(r.bin, [...r.pre, ...inv.args], { cwd: ctx.stage, stdin: inv.stdin, timeoutMs: req.timeout_sec * 1000, env: workerEnv(), signal, onSpawn });
   fs.rmSync(workerFile, { force: true });
+  fs.rmSync(activeFile, { force: true });
   fs.writeFileSync(path.join(dir, `attempt-${n}-${cand.agent}-stdout.log`), proc.stdout);
   fs.writeFileSync(path.join(dir, `attempt-${n}-${cand.agent}-stderr.log`), proc.stderr);
   const meta = { ...base, exit_code: proc.code, duration_sec: Math.round((Date.now() - t0) / 100) / 10 };
@@ -497,7 +584,7 @@ export async function runOnce(cand, req, dir, stagedFiles, n, signal) {
     const cls = p.errClass ?? classifyText(textForClass) ?? (p.out ? ERROR.MALFORMED : ERROR.CRASH);
     return { ...meta, ok: false, error_class: cls, message: (p.errs.join(' | ') || tail || `exit code ${proc.code}`).slice(0, 1500), session_id: p.sessionId, raw_error: textForClass.slice(0, 2000) };
   }
-  const bad = checkWorkerOutput(p.out);
+  const bad = req.output_schema ? checkCustomOutput(p.out, req.output_schema) : checkWorkerOutput(p.out);
   if (bad) return { ...meta, ok: false, error_class: ERROR.MALFORMED, message: `worker output rejected: ${bad}. Raw start: ${String(p.rawText ?? '').slice(0, 300)}`, session_id: p.sessionId };
   return { ...meta, ok: true, output: p.out, session_id: p.sessionId, usage: p.usage };
 }

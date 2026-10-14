@@ -169,7 +169,10 @@ if (PROJECT && !CHECK) {
   }
   if (cfg) {
     const b = backup(mcpFile);
-    cfg.mcpServers['agent-bridge'] = { type: 'stdio', command: process.execPath, args: [SERVER], env: { AGENT_BRIDGE_PROJECT: PROJECT } };
+    // --extra-roots "D:\media;E:\shared": extra folders workers may receive files/images from.
+    const extraRoots = opt('--extra-roots');
+    const env = { AGENT_BRIDGE_PROJECT: PROJECT, ...(extraRoots ? { AGENT_BRIDGE_ROOTS: extraRoots } : {}) };
+    cfg.mcpServers['agent-bridge'] = { type: 'stdio', command: process.execPath, args: [SERVER], env };
     fs.writeFileSync(mcpFile, `${JSON.stringify(cfg, null, 2)}\n`);
     ok(`wrote ${mcpFile}${b ? ` (backup: ${path.basename(b)})` : ''}`);
     report.registered.push('claude-code (.mcp.json)');

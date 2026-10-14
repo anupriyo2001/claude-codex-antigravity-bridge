@@ -87,7 +87,23 @@ Other flags: `--check` (report only), `--no-install`, `--skip-signin`, `--regist
 | `agent_apply_changes` | apply a reviewed write job's changes (`dry_run` default true; conflict-checked; backs up originals) |
 | `agent_limits` | show or clear usage-limit cooldowns |
 
-The same functions exist as a CLI: `node src/cli.mjs status | models | route | run | result | apply | limits`.
+The same functions exist as a CLI: `node src/cli.mjs status | models | route | run | result | apply | limits | watch`.
+
+### Team features
+
+- **Images** (`images: [...]`, up to 16 jpg/png/webp): contact sheets, thumbnails or frames for vision
+  jobs. Codex gets them attached; Gemini opens them itself. Images may come from the project or from an
+  extra root registered with `setup --extra-roots "D:\media;E:\shared"`. Video and audio are always refused.
+- **Background web search** (`permissions.web: true`): Codex only, through its API search (`codex --search`).
+  No browser window ever opens. Antigravity is never sent web jobs, because its headless web tools drive a
+  visible browser.
+- **Custom answer shapes** (`output_schema`): pass a JSON Schema (type object) and get the worker's
+  answer back as `output`, e.g. `{shots:[{row_id, pick, backup, reason}]}` or `{claims:[{claim, verdict, sources}]}`.
+  For Codex, every object needs `additionalProperties: false` and all properties listed in `required`.
+- **See who is working**: every task result starts with `[agent · model · effort]` (Antigravity's effort
+  is read from model names such as `gemini-3.8-flash-medium`), and `running` results name them too.
+  `agent_bridge_status` lists running jobs. `node src/cli.mjs watch` is a live view to keep open in a
+  terminal.
 
 ## How routing works
 
@@ -184,7 +200,8 @@ handling) follow the official docs but have **not been run** yet.
   staging, the prompt rules and policy, so keep secrets out of reach regardless.
 - The classifier is a heuristic. Override with `tier`, `model`/`effort` or edit `routing.json`.
 - Model names in `routing.json` change over time. Unknown ones are skipped automatically, but update the list.
-- Antigravity headless has no shell, so give it reading/editing jobs.
+- Antigravity headless has no shell and no web here, so give it reading, editing and vision jobs. Its
+  Gemini models are listed first in `routing.json`; its Claude/GPT-OSS models are last-resort fallbacks.
 - Some MCP hosts (reportedly the Claude desktop app) cancel tool calls after about 60 s. Task tools therefore return
   `running` after 40 s, and `agent_task_result` collects the result.
 

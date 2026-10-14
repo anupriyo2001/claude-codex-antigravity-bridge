@@ -8,6 +8,11 @@ const good = { summary: 'mock ok', findings: [{ severity: 'info', file: null, li
 
 switch (behaviour) {
   case 'ok': fs.writeFileSync(last, JSON.stringify(good)); break;
+  case 'custom': {
+    const imgs = fs.existsSync(path.join(stage, '_images')) ? fs.readdirSync(path.join(stage, '_images')) : [];
+    fs.writeFileSync(last, JSON.stringify({ summary: `saw ${imgs.length} image(s)`, picks: imgs }));
+    break;
+  }
   case 'write': {
     const f = fs.readdirSync(stage).find((n) => n.endsWith('.txt'));
     if (f) fs.appendFileSync(path.join(stage, f), `edited by mock pid ${process.pid}\n`);

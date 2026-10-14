@@ -7,13 +7,14 @@
 //   node src/cli.mjs result <task_id>
 //   node src/cli.mjs apply <task_id> [--confirm] [--files a,b]
 //   node src/cli.mjs limits [--clear key|all]
+//   node src/cli.mjs watch [--once]               live: which agent/model/effort is running
 import fs from 'node:fs';
-import { getResult, applyChanges, sweepOrphans, ADAPTERS, AGENTS } from './core.mjs';
+import { getResult, applyChanges, sweepOrphans, ADAPTERS, AGENTS, activeTasks, describeRun } from './core.mjs';
 import { runTask, routeTask, agentStatus, readLimits, clearLimits } from './router.mjs';
 
 const [cmd, arg, ...rest] = process.argv.slice(2);
 const print = (o) => { process.stdout.write(`${JSON.stringify(o, null, 2)}\n`); };
-const usage = 'usage: cli.mjs status | models | route <task.json|-> | run <task.json|-> | result <id> | apply <id> [--confirm] [--files a,b] | limits [--clear key|all]';
+const usage = 'usage: cli.mjs status | models | route <task.json|-> | run <task.json|-> | result <id> | apply <id> [--confirm] [--files a,b] | limits [--clear key|all] | watch [--once]';
 
 function readTask(a) {
   const text = a === '-' ? fs.readFileSync(0, 'utf8') : fs.readFileSync(a, 'utf8');
@@ -46,6 +47,18 @@ async function main() {
       const files = fi >= 0 ? (rest[fi + 1] || '').split(',').filter(Boolean) : null;
       const r = applyChanges(arg, { dryRun: !rest.includes('--confirm'), files });
       print(r); return r.ok ? 0 : 1;
+    }
+    case 'watch': {
+      // Live view of external jobs (keep it open in a terminal panel). Ctrl+C to stop.
+      const once = arg === '--once';
+      for (;;) {
+        const rows = activeTasks();
+        const lines = rows.length ? rows.map((a) => `  ${describeRun(a).padEnd(46)} ${String(a.elapsed_sec).padStart(4)}s  ${a.kind.padEnd(9)} ${a.objective.slice(0, 60)}`) : ['  (no external agent running)'];
+        const text = [`agent-bridge - ${new Date().toLocaleTimeString()}`, ...lines].join('\n');
+        if (once) { process.stdout.write(`${text}\n`); return 0; }
+        process.stdout.write(`\x1b[2J\x1b[H${text}\n`);
+        await new Promise((r) => setTimeout(r, 2000));
+      }
     }
     case 'limits': {
       if (arg === '--clear') clearLimits(rest[0] === 'all' || !rest[0] ? null : rest[0]);
