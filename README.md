@@ -25,7 +25,7 @@ YOU
 Windows (PowerShell):
 
 ```powershell
-git clone <this repo> claude-codex-antigravity-bridge
+git clone https://github.com/anupriyo2001/claude-codex-antigravity-bridge.git
 cd claude-codex-antigravity-bridge
 .\setup.ps1 -Project "C:\path\to\your\project" --claude-md
 ```
@@ -33,6 +33,8 @@ cd claude-codex-antigravity-bridge
 macOS / Linux:
 
 ```bash
+git clone https://github.com/anupriyo2001/claude-codex-antigravity-bridge.git
+cd claude-codex-antigravity-bridge && chmod +x setup.sh
 ./setup.sh --project /path/to/your/project --claude-md
 ```
 
