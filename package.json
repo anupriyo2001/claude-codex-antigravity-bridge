@@ -1,0 +1,17 @@
+{
+  "name": "claude-codex-antigravity-bridge",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Connect Claude Code (orchestrator) with OpenAI Codex and Google Antigravity: MCP bridge with zero-token model/effort routing, usage-limit failover, isolated staging and reviewed apply.",
+  "type": "module",
+  "engines": { "node": ">=18.18" },
+  "bin": { "agent-bridge": "src/cli.mjs", "agent-bridge-mcp": "src/mcp-server.mjs" },
+  "scripts": {
+    "setup": "node scripts/setup.mjs",
+    "status": "node src/cli.mjs status",
+    "mcp": "node src/mcp-server.mjs",
+    "test": "node tests/run-tests.mjs",
+    "test:real": "node tests/run-tests.mjs --real"
+  },
+  "license": "UNLICENSED"
+}

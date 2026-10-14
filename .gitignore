@@ -1,0 +1,7 @@
+node_modules/
+tests/last-report*.json
+*.bak-*
+.env
+.env.*
+.DS_Store
+Thumbs.db

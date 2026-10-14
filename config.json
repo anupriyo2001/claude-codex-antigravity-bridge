@@ -1,0 +1,22 @@
+{
+  "allowed_roots": [],
+  "state_dir": null,
+  "limits": {
+    "max_files": 200,
+    "max_file_bytes": 1048576,
+    "max_total_bytes": 10485760,
+    "default_timeout_sec": 600,
+    "min_timeout_sec": 5,
+    "max_timeout_sec": 1800,
+    "default_retries": 1,
+    "max_retries": 2,
+    "max_candidates": 4,
+    "apply_lock_stale_sec": 600,
+    "rate_limit_cooldown_min": 30,
+    "auth_cooldown_min": 10,
+    "unknown_model_cooldown_hours": 12,
+    "model_list_cache_hours": 6
+  },
+  "codex": { "bin": null, "ignore_user_config": true },
+  "antigravity": { "bin": null }
+}

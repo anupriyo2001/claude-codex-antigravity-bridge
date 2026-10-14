@@ -1,0 +1,35 @@
+{
+  "$comment": "Ordered candidates per difficulty tier. The router tries them in order, skipping agents that are not installed, models the agent does not list, and anything inside a usage-limit cooldown. Edit freely when providers ship new models; run `node src/cli.mjs models` to see what your accounts offer.",
+  "tiers": {
+    "light": [
+      { "agent": "codex", "model": "gpt-6-luna", "effort": "low" },
+      { "agent": "antigravity", "model": "gemini-3.8-flash-low" },
+      { "agent": "codex", "model": "gpt-5.6-luna", "effort": "low" },
+      { "agent": "codex", "model": "gpt-6.1-sol", "effort": "low" }
+    ],
+    "standard": [
+      { "agent": "codex", "model": "gpt-6.1-sol", "effort": "medium" },
+      { "agent": "antigravity", "model": "gemini-3.8-flash-medium" },
+      { "agent": "codex", "model": "gpt-6-sol", "effort": "medium" },
+      { "agent": "antigravity", "model": "claude-sonnet-4-6" }
+    ],
+    "heavy": [
+      { "agent": "codex", "model": "gpt-6-astra", "effort": "high" },
+      { "agent": "antigravity", "model": "claude-opus-4-6-thinking" },
+      { "agent": "codex", "model": "gpt-6.1-sol", "effort": "high" },
+      { "agent": "antigravity", "model": "gemini-3.8-flash-high" }
+    ]
+  },
+  "claude": {
+    "$comment": "Advice for Claude Code's own subagents (Agent tool model/effort) when it does the work itself or every external candidate is exhausted.",
+    "light": { "model": "haiku", "effort": "low" },
+    "standard": { "model": "sonnet", "effort": "medium" },
+    "heavy": { "model": "opus", "effort": "high" }
+  },
+  "classifier": {
+    "kind_weight": { "explain": 0, "summarize": 0, "review": 1, "test": 1, "analyze": 1, "debug": 2, "implement": 2, "design": 3, "other": 1 },
+    "heavy_keywords": ["architecture", "security", "vulnerab", "concurrency", "race condition", "deadlock", "migration", "root cause", "intermittent", "flaky", "memory leak", "performance", "distributed", "cryptograph", "authentication", "authorization", "refactor across", "redesign", "threading", "data loss"],
+    "light_keywords": ["typo", "rename", "format", "lint", "comment", "docstring", "summarise", "summarize", "explain", "list the", "simple", "small", "one-line", "one line", "quick", "trivial"],
+    "thresholds": { "light_max": 1, "standard_max": 3 }
+  }
+}
