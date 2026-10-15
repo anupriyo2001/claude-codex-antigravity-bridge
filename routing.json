@@ -1,5 +1,5 @@
 {
-  "$comment": "Ordered candidates per difficulty tier. The router tries them in order, skipping agents that are not installed, models the agent does not list, and anything inside a usage-limit cooldown. Edit freely when providers ship new models; run `node src/cli.mjs models` to see what your accounts offer. Antigravity is used for its Gemini models (vision); its Claude/GPT-OSS models are last-resort fallbacks.",
+  "$comment": "Cost-first: each tier lists the cheapest capable models first; the router escalates only when a candidate fails. Gemini (Antigravity) always runs its Flash model at high effort. Premium models are never picked automatically (see 'premium'); a request must set allow_premium: true. Run `node src/cli.mjs models` to see what your accounts offer.",
   "tiers": {
     "light": [
       {
@@ -9,43 +9,34 @@
       },
       {
         "agent": "antigravity",
-        "model": "gemini-3.8-flash-low"
+        "model": "gemini-3.8-flash-high"
       },
       {
         "agent": "codex",
         "model": "gpt-5.6-luna",
-        "effort": "low"
-      },
-      {
-        "agent": "codex",
-        "model": "gpt-6.1-sol",
         "effort": "low"
       }
     ],
     "standard": [
       {
         "agent": "codex",
-        "model": "gpt-6.1-sol",
-        "effort": "medium"
-      },
-      {
-        "agent": "antigravity",
-        "model": "gemini-3.8-flash-medium"
-      },
-      {
-        "agent": "codex",
-        "model": "gpt-6-sol",
+        "model": "gpt-6-luna",
         "effort": "medium"
       },
       {
         "agent": "antigravity",
         "model": "gemini-3.8-flash-high"
+      },
+      {
+        "agent": "codex",
+        "model": "gpt-5.6-terra",
+        "effort": "medium"
       }
     ],
     "heavy": [
       {
         "agent": "codex",
-        "model": "gpt-6-astra",
+        "model": "gpt-6-luna",
         "effort": "high"
       },
       {
@@ -55,7 +46,12 @@
       {
         "agent": "codex",
         "model": "gpt-6.1-sol",
-        "effort": "high"
+        "effort": "medium"
+      },
+      {
+        "agent": "codex",
+        "model": "gpt-6-astra",
+        "effort": "medium"
       },
       {
         "agent": "antigravity",
@@ -64,7 +60,7 @@
     ]
   },
   "claude": {
-    "$comment": "Advice for Claude Code's own subagents (Agent tool model/effort) when it does the work itself or every external candidate is exhausted.",
+    "$comment": "Advice for Claude Code's own subagents when Claude does the work itself. Opus is premium: only when a job truly needs it.",
     "light": {
       "model": "haiku",
       "effort": "low"
@@ -74,7 +70,7 @@
       "effort": "medium"
     },
     "heavy": {
-      "model": "opus",
+      "model": "sonnet",
       "effort": "high"
     }
   },
@@ -134,5 +130,28 @@
       "light_max": 1,
       "standard_max": 3
     }
+  },
+  "premium": {
+    "$comment": "Never chosen automatically. A candidate matches when agent and model match and its effort is at or above min_effort (default: any).",
+    "models": [
+      {
+        "agent": "codex",
+        "model": "gpt-6-astra"
+      },
+      {
+        "agent": "codex",
+        "model": "gpt-6.1-sol",
+        "min_effort": "high"
+      },
+      {
+        "agent": "codex",
+        "model": "gpt-6-sol",
+        "min_effort": "high"
+      },
+      {
+        "agent": "antigravity",
+        "model": "claude-opus-4-6-thinking"
+      }
+    ]
   }
 }

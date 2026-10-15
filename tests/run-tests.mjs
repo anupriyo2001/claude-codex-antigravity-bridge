@@ -206,6 +206,18 @@ await test('visibility: running jobs listed with agent / model / effort', async 
   return row.running_on;
 });
 
+await test('cost guard: premium models never chosen unless allowed', async () => {
+  const prem = router.isPremium;
+  ok(prem({ agent: 'codex', model: 'gpt-6-astra', effort: 'low' }) && prem({ agent: 'codex', model: 'gpt-6.1-sol', effort: 'high' })
+    && !prem({ agent: 'codex', model: 'gpt-6.1-sol', effort: 'medium' }) && !prem({ agent: 'codex', model: 'gpt-6-luna', effort: 'high' })
+    && !prem({ agent: 'antigravity', model: 'gemini-3.8-flash-high' }), 'premium table');
+  const r = await router.routeTask({ objective: 'race condition root cause', kind: 'debug', tier: 'heavy' });
+  ok(!r.candidates.some(prem), JSON.stringify(r.candidates));
+  const allowed = await router.routeTask({ objective: 'race condition root cause', kind: 'debug', tier: 'heavy', allow_premium: true });
+  ok(r.claude.model !== 'opus', 'claude advice should not default to opus');
+  return `heavy chain: ${r.candidates.map((c) => `${c.model}@${c.effort ?? 'slug'}`).join(' > ') || '(none installed)'}; with allow_premium: ${allowed.candidates.length} candidates`;
+});
+
 // ------------------------------------------------------------- staging, apply, concurrency, orphans
 
 await test('read-only task: worker edits never applicable', async () => {

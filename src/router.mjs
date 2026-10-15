@@ -119,6 +119,7 @@ export async function buildCandidates(req, tier) {
   const limits = readLimits();
   const out = [];
   for (const c of pool) {
+    if (!c.pinned && !req.allow_premium && isPremium(c)) { notes.push(`skip ${c.agent}:${c.model}${c.effort ? `@${c.effort}` : ''}: premium (set allow_premium to use)`); continue; }
     if (!agentNames().includes(c.agent)) continue;
     const adapter = adapterFor(c.agent);
     if (!adapter.resolve()) { notes.push(`skip ${c.agent}: not installed`); continue; }
@@ -134,6 +135,13 @@ export async function buildCandidates(req, tier) {
     out.push(c);
   }
   return { candidates: out.slice(0, req.failover ? LIMITS.max_candidates : 1), notes };
+}
+
+const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
+// Premium = expensive per call; only used when a request explicitly allows it (or pins the model).
+export function isPremium(c) {
+  return (ROUTING.premium?.models || []).some((p) => p.agent === c.agent && p.model === c.model
+    && (!p.min_effort || EFFORTS.indexOf(c.effort ?? 'medium') >= EFFORTS.indexOf(p.min_effort)));
 }
 
 export function claudeAdvice(tier) {

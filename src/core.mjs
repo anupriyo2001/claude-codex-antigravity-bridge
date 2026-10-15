@@ -67,7 +67,7 @@ export const TASK_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 const KINDS = ['explain', 'summarize', 'review', 'test', 'analyze', 'debug', 'implement', 'design', 'other'];
 const KNOWN_KEYS = new Set(['task_id', 'agent', 'objective', 'project_path', 'input_files', 'context', 'constraints',
   'expected_output', 'timeout_sec', 'retries', 'permissions', 'kind', 'tier', 'model', 'effort', 'failover', 'fallback_agent',
-  'images', 'output_schema']);
+  'images', 'output_schema', 'allow_premium']);
 const IMAGE_EXT = /\.(jpe?g|png|webp)$/i;
 const MAX_IMAGES = 16;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
@@ -103,6 +103,7 @@ export function validateRequest(raw) {
     model: raw.model ?? null,
     effort: raw.effort ?? null,
     failover: raw.failover !== false,
+    allow_premium: raw.allow_premium === true,
     fallback_agent: raw.fallback_agent ?? null,
   };
   if (typeof req.task_id !== 'string' || !TASK_ID_RE.test(req.task_id)) errors.push('task_id must match ^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$');

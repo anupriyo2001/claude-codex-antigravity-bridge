@@ -28,6 +28,7 @@ const taskProps = {
   timeout_sec: { type: 'integer', minimum: 5, maximum: 1800, description: 'Per attempt. Default 600.' },
   retries: { type: 'integer', minimum: 0, maximum: 2, description: 'Same-candidate retries for crash/malformed output. Default 1.' },
   failover: { type: 'boolean', description: 'Move to the next model/agent on usage limits or failures. Default true.' },
+  allow_premium: { type: 'boolean', description: 'Allow premium models (e.g. gpt-6-astra, gpt-6.1-sol at high effort). Default false: cheapest capable models only.' },
   permissions: { type: 'object', properties: {
     write: { type: 'boolean', description: 'true lets the worker edit its staged copy; the project is untouched until agent_apply_changes.' },
     web: { type: 'boolean', description: 'true allows background web search (Codex only, via API; no browser). Routes to Codex.' } }, additionalProperties: false },

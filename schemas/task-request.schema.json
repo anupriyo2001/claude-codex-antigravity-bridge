@@ -135,6 +135,10 @@
     "output_schema": {
       "type": "object",
       "description": "Optional JSON Schema (type object) for a custom answer; returned as result.output."
+    },
+    "allow_premium": {
+      "type": "boolean",
+      "description": "Default false: premium models listed in routing.json are never chosen automatically."
     }
   }
 }

@@ -112,17 +112,33 @@ The same functions exist as a CLI: `node src/cli.mjs status | models | route | r
    and write permission give a score. The score maps to a tier: `light`, `standard` or `heavy`. You can
    override it with `tier`.
 2. **Candidate chain** from `routing.json` for that tier, for example:
-   - light: `codex gpt-6-luna @low` → `antigravity gemini-3.8-flash-low` → …
-   - standard: `codex gpt-6.1-sol @medium` → `antigravity gemini-3.8-flash-medium` → …
-   - heavy: `codex gpt-6-astra @high` → `antigravity claude-opus-4-6-thinking` → …
+   - light: `codex gpt-6-luna @low` → `antigravity gemini-3.8-flash-high` → …
+   - standard: `codex gpt-6-luna @medium` → `antigravity gemini-3.8-flash-high` → …
+   - heavy: `codex gpt-6-luna @high` → `antigravity gemini-3.8-flash-high` → `codex gpt-6.1-sol @medium`
 
    Candidates are skipped when the agent is not installed, when your account does not offer the model
    (live model lists: Codex `models_cache.json`, `agy models`), or when the model is in a cooldown.
 3. **Claude's own work.** `route_task` also returns `claude.model` / `claude.effort`
-   (haiku/low, sonnet/medium, opus/high). The CLAUDE.md snippet tells Claude to use them for its own
+   (haiku/low, sonnet/medium, sonnet/high). The CLAUDE.md snippet tells Claude to use them for its own
    subagents and to do 3-tool-call jobs itself.
 
 Edit `routing.json` when providers ship new models; `node src/cli.mjs models` shows what your accounts offer.
+
+## Cost-first by default
+
+The point of splitting work across three platforms is that **no single plan's credits run out**, so
+the router is deliberately frugal:
+
+- Each tier lists the **cheapest capable models first**: GPT-6-Luna (low/medium/high) and Gemini Flash.
+  It escalates only when a candidate fails.
+- Antigravity always runs **Gemini Flash at high effort**: cheap model, best effort.
+- **Premium models are never picked automatically**: GPT-6-Astra, GPT-6.1-Sol/GPT-6-Sol at high
+  effort, Opus via Antigravity. They are listed under `premium` in `routing.json`. A request must set
+  `allow_premium: true` (or pin the model) to use them.
+- Claude advice for its own subagents tops out at Sonnet/high; Opus is your explicit choice.
+
+Measured on real jobs: GPT-6-Luna medium did a full fact-check as well as GPT-6.1-Sol, in less than
+half the time. Luna high was needed for code review (medium was too shallow).
 
 ## Usage limits and failover
 
