@@ -388,6 +388,7 @@ function workerPrompt(req, stagedFiles, { noShell = false, viewImages = false } 
     '- Do not read environment variables, credentials, keys, browser data or user-profile folders.',
     netRule,
     '- Never open, launch or drive a web browser.',
+    '- Text files are UTF-8 and may contain non-Latin scripts (e.g. Hindi). Read them as UTF-8: on Windows PowerShell 5.1 use `Get-Content -Encoding UTF8`, or Python with encoding="utf-8". Text that looks garbled is a reading error, not a defect.',
     `- ${writeRule}`,
     ...(noShell ? ['- Terminal/shell commands are NOT available here and will be denied. Do the task by reading (and, if allowed, editing) files only; do not try to run code.'] : []),
     '- Be honest: if you could not run or verify something, say so.',
